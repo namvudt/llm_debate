@@ -4,7 +4,11 @@ from typing import Dict, List, Optional, Protocol
 
 import attrs
 import numpy as np
-from anthropic import AI_PROMPT, HUMAN_PROMPT
+try:
+    from anthropic import AI_PROMPT, HUMAN_PROMPT
+except ImportError:
+    HUMAN_PROMPT = "\n\nHuman: "
+    AI_PROMPT = "\n\nAssistant: "
 from pydantic import BaseModel
 
 PRINT_COLORS = {"user": "cyan", "system": "magenta", "assistant": "light_green"}
@@ -38,13 +42,16 @@ class StopReason(Enum):
     @classmethod
     def factory(cls, stop_reason: str) -> "StopReason":
         """
-        Parses the openai and anthropic stop reasons into a StopReason enum.
+        Parses the openai, anthropic, and gemini stop reasons into a StopReason enum.
         """
-        if stop_reason in ["max_tokens", "length"]:
-            return cls.MAX_TOKENS
-        elif stop_reason in ["stop_sequence", "stop"]:
+        if not stop_reason:
             return cls.STOP_SEQUENCE
-        raise ValueError(f"Invalid stop reason: {stop_reason}")
+        stop_str = str(stop_reason).lower()
+        if stop_str in ["max_tokens", "length", "max_tokens_to_sample"]:
+            return cls.MAX_TOKENS
+        elif stop_str in ["stop_sequence", "stop", "end_turn"]:
+            return cls.STOP_SEQUENCE
+        return cls.STOP_SEQUENCE
 
     def __repr__(self):
         return self.name

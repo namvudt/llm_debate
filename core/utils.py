@@ -41,9 +41,12 @@ def setup_environment(
 ):
     setup_logging(logger_level)
     secrets = load_secrets("SECRETS")
-    openai.api_key = secrets[openai_tag]
-    os.environ["ANTHROPIC_API_KEY"] = secrets[anthropic_tag]
-    if organization is not None:
+    openai.api_key = secrets.get(openai_tag, "")
+    if anthropic_tag in secrets:
+        os.environ["ANTHROPIC_API_KEY"] = secrets.get(anthropic_tag, "")
+    if "OPENAI_API_BASE" in secrets and secrets["OPENAI_API_BASE"]:
+        openai.api_base = secrets["OPENAI_API_BASE"]
+    if organization is not None and organization in secrets and secrets[organization]:
         openai.organization = secrets[organization]
 
 
@@ -63,10 +66,16 @@ def setup_logging(level_str):
 
 def load_secrets(file_path):
     secrets = {}
+    if not os.path.exists(file_path):
+        return secrets
     with open(file_path) as f:
         for line in f:
-            key, value = line.strip().split("=", 1)
-            secrets[key] = value
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, value = line.split("=", 1)
+                secrets[key.strip()] = value.strip()
     return secrets
 
 

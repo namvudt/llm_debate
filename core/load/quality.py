@@ -508,7 +508,7 @@ def dataset_to_questions(
 
 async def parse_dataset(split: str = "train") -> List[QualityQuestionsForArticle]:
     dataset_path = await fetch_dataset(split)
-    with open(dataset_path, "r") as f:
+    with open(dataset_path, "r", encoding="utf-8", errors="replace") as f:
         text = f.read()
         parsed = []
         for line in text.splitlines():
@@ -529,7 +529,7 @@ async def fetch_dataset(split: str = "train", force_download: bool = False):
             "\u2029", ""
         )  # unusual line terminators
         text = text.replace("\xa0", " ")  # non-breaking space
-        with open(cache_path, "w") as f:
+        with open(cache_path, "w", encoding="utf-8") as f:
             f.write(text)
 
     return cache_path

@@ -105,10 +105,26 @@ class DebaterQuality(DebaterBase):
             elif "<argument>" not in response:
                 response = "<argument>I have nothing more to add.</argument>"
         if "<argument>" not in response:
-            if strict:
-                raise ValueError("No argument tag in response", response)
+            if "</thinking>" in response:
+                response_ = response.split("</thinking>")[-1].strip()
+                if response_:
+                    response = f"<argument>{response_}</argument>"
+            elif "<think>" in response and "</think>" in response:
+                response_ = response.split("</think>")[-1].strip()
+                if response_:
+                    response = f"<argument>{response_}</argument>"
+            elif "Argument:" in response:
+                response_ = response.split("Argument:", 1)[1].strip()
+                if response_:
+                    response = f"<argument>{response_}</argument>"
+            elif not strict:
+                response = f"<argument>{response.strip()}</argument>"
             else:
-                response = f"<argument>{response}</argument>"
+                cleaned = re.sub(r"<thinking>.*?</thinking>", "", response, flags=re.DOTALL).strip()
+                if cleaned:
+                    response = f"<argument>{cleaned}</argument>"
+                else:
+                    raise ValueError("No argument tag in response", response)
         argument = response.split("<argument>")[1].split("</argument>")[0]
         if self.config.transcript_quotes is not None:
             return self.handle_quotes(argument)

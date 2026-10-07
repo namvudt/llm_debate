@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import Callable, Literal, Optional, Union
 
 import attrs
+import openai
 
 from core.llm_api.anthropic_llm import ANTHROPIC_MODELS, AnthropicChatModel
 from core.llm_api.base_llm import LLMResponse, ModelAPIProtocol
+from core.llm_api.gemini_llm import GEMINI_MODELS, GeminiChatModel
 from core.llm_api.openai_llm import (
     BASE_MODELS,
     GPT_CHAT_MODELS,
@@ -35,6 +37,7 @@ class ModelAPI:
     _openai_base: OpenAIBaseModel = attrs.field(init=False)
     _openai_chat: OpenAIChatModel = attrs.field(init=False)
     _anthropic_chat: AnthropicChatModel = attrs.field(init=False)
+    _gemini_chat: GeminiChatModel = attrs.field(init=False)
 
     running_cost: float = attrs.field(init=False, default=0)
     model_timings: dict[str, list[float]] = attrs.field(init=False, default={})
@@ -44,18 +47,27 @@ class ModelAPI:
         secrets = load_secrets("SECRETS")
         if self.organization is None:
             self.organization = "DEFAULT_ORG"
+        org_val = secrets.get(self.organization, "") if self.organization in secrets else None
+        if "OPENAI_API_BASE" in secrets and secrets["OPENAI_API_BASE"]:
+            openai.api_base = secrets["OPENAI_API_BASE"]
+        openai.api_key = secrets.get("API_KEY", "")
         self._openai_base = OpenAIBaseModel(
             frac_rate_limit=self.openai_fraction_rate_limit,
-            organization=secrets[self.organization],
+            organization=org_val,
             print_prompt_and_response=self.print_prompt_and_response,
         )
         self._openai_chat = OpenAIChatModel(
             frac_rate_limit=self.openai_fraction_rate_limit,
-            organization=secrets[self.organization],
+            organization=org_val,
             print_prompt_and_response=self.print_prompt_and_response,
         )
         self._anthropic_chat = AnthropicChatModel(
             num_threads=self.anthropic_num_threads,
+            print_prompt_and_response=self.print_prompt_and_response,
+        )
+        gemini_key = secrets.get("GEMINI_API_KEY", secrets.get("API_KEY", ""))
+        self._gemini_chat = GeminiChatModel(
+            api_key=gemini_key,
             print_prompt_and_response=self.print_prompt_and_response,
         )
         Path("./prompt_history").mkdir(exist_ok=True)
@@ -145,7 +157,9 @@ class ModelAPI:
             #     model_ids = [model_ids]
 
         def model_id_to_class(model_id: str) -> ModelAPIProtocol:
-            if model_id in BASE_MODELS:
+            if model_id in GEMINI_MODELS or model_id.startswith("gemini"):
+                return self._gemini_chat
+            elif model_id in BASE_MODELS:
                 return self._openai_base
             elif model_id in GPT_CHAT_MODELS or "ft:gpt-3.5-turbo" in model_id:
                 return self._openai_chat

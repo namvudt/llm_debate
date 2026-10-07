@@ -144,3 +144,7 @@ prompt_history/*
 prompt_history
 wandb/
 .hydra/
+__MACOSX/
+data/llm_debate_dataset/
+data/*.csv
+data/dataset_readme.md

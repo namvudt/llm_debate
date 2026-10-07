@@ -9,8 +9,10 @@ from traceback import format_exc
 from typing import Optional, Union
 
 import attrs
-from anthropic import AsyncAnthropic
-from anthropic.types.completion import Completion as AnthropicCompletion
+try:
+    from anthropic import AsyncAnthropic
+except ImportError:
+    AsyncAnthropic = None
 from termcolor import cprint
 
 from core.llm_api.base_llm import (
@@ -50,8 +52,8 @@ class AnthropicChatModel(ModelAPIProtocol):
 
     @staticmethod
     def _create_prompt_history_file(prompt):
-        filename = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}_prompt.txt"
-        with open(os.path.join("prompt_history", filename), "w") as f:
+        filename = f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S.%f')[:-3]}_prompt.txt"
+        with open(os.path.join("prompt_history", filename), "w", encoding="utf-8") as f:
             json_str = json.dumps(prompt, indent=4)
             json_str = json_str.replace("\\n", "\n")
             f.write(json_str)
@@ -60,7 +62,7 @@ class AnthropicChatModel(ModelAPIProtocol):
 
     @staticmethod
     def _add_response_to_prompt_file(prompt_file, response):
-        with open(os.path.join("prompt_history", prompt_file), "a") as f:
+        with open(os.path.join("prompt_history", prompt_file), "a", encoding="utf-8") as f:
             f.write("\n\n======RESPONSE======\n\n")
             json_str = json.dumps(response.to_dict(), indent=4)
             json_str = json_str.replace("\\n", "\n")

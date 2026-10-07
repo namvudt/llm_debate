@@ -56,6 +56,8 @@ def price_per_token(model_id: str) -> tuple[float, float]:
         prices = 0.02, 0.02
     elif "ft:gpt-3.5-turbo" in model_id:
         prices = 0.012, 0.016
+    elif model_id.startswith("gemini"):
+        prices = 0.00015, 0.0006
     else:
         raise ValueError(f"Invalid model id: {model_id}")
 
@@ -89,8 +91,11 @@ class Resource:
             self.refresh_rate,
             self.value + (curr_time - self.last_update_time) * self.refresh_rate / 60,
         )
-        self.last_update_time = curr_time
-        self.throughput = self.total / (curr_time - self.start_time) * 60
+        elapsed = curr_time - self.start_time
+        if elapsed > 0:
+            self.throughput = self.total / elapsed * 60
+        else:
+            self.throughput = 0
 
     def geq(self, amount: float) -> bool:
         self._replenish()
@@ -149,8 +154,8 @@ class OpenAIModel(ModelAPIProtocol):
 
     @staticmethod
     def _create_prompt_history_file(prompt):
-        filename = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}_prompt.txt"
-        with open(os.path.join("prompt_history", filename), "w") as f:
+        filename = f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S.%f')[:-3]}_prompt.txt"
+        with open(os.path.join("prompt_history", filename), "w", encoding="utf-8") as f:
             json_str = json.dumps(prompt, indent=4)
             json_str = json_str.replace("\\n", "\n")
             f.write(json_str)
@@ -159,7 +164,7 @@ class OpenAIModel(ModelAPIProtocol):
 
     @staticmethod
     def _add_response_to_prompt_file(prompt_file, responses):
-        with open(os.path.join("prompt_history", prompt_file), "a") as f:
+        with open(os.path.join("prompt_history", prompt_file), "a", encoding="utf-8") as f:
             f.write("\n\n======RESPONSE======\n\n")
             json_str = json.dumps(
                 [response.to_dict() for response in responses], indent=4
@@ -291,7 +296,17 @@ _GPT_TURBO_MODELS = [
     "gpt-3.5-turbo-16k-0613",
     "gpt-3.5-turbo-1106",
 ]
-GPT_CHAT_MODELS = set(_GPT_4_MODELS + _GPT_TURBO_MODELS)
+_GEMINI_MODELS = [
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-pro",
+    "gemini-1.5-pro-latest",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-exp",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+]
+GPT_CHAT_MODELS = set(_GPT_4_MODELS + _GPT_TURBO_MODELS + _GEMINI_MODELS)
 
 
 class OpenAIChatModel(OpenAIModel):
@@ -301,24 +316,36 @@ class OpenAIChatModel(OpenAIModel):
     def _assert_valid_id(self, model_id: str):
         if "ft:" in model_id:
             model_id = model_id.split(":")[1]
+        if model_id.startswith("gemini"):
+            return
         assert model_id in GPT_CHAT_MODELS, f"Invalid model id: {model_id}"
 
-    @retry(stop=stop_after_attempt(8), wait=wait_fixed(2))
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
     async def _get_dummy_response_header(self, model_id: str):
-        url = "https://api.openai.com/v1/chat/completions"
+        api_base = getattr(openai, "api_base", "https://api.openai.com/v1")
+        url = f"{api_base.rstrip('/')}/chat/completions"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {openai.api_key}",
-            "OpenAI-Organization": self.organization,
         }
+        if self.organization:
+            headers["OpenAI-Organization"] = self.organization
         data = {
             "model": model_id,
             "messages": [{"role": "user", "content": "Say 1"}],
         }
-        response = requests.post(url, headers=headers, json=data)
-        if "x-ratelimit-limit-tokens" not in response.headers:
-            raise RuntimeError("Failed to get dummy response header")
-        return response.headers
+        try:
+            response = requests.post(url, headers=headers, json=data, timeout=15)
+            if "x-ratelimit-limit-tokens" in response.headers:
+                return response.headers
+        except Exception:
+            pass
+        return {
+            "x-ratelimit-limit-tokens": "10000000",
+            "x-ratelimit-limit-requests": "10000",
+            "x-ratelimit-remaining-tokens": "10000000",
+            "x-ratelimit-remaining-requests": "10000",
+        }
 
     @staticmethod
     def _count_prompt_token_capacity(prompt: OAIChatPrompt, **kwargs) -> int:
@@ -338,13 +365,15 @@ class OpenAIChatModel(OpenAIModel):
         )
 
     def convert_top_logprobs(self, data):
+        if not data:
+            return None
         # Initialize the new structure with only top_logprobs
         top_logprobs = []
 
-        for item in data["content"]:
+        for item in data.get("content", []):
             # Prepare a dictionary for top_logprobs
             top_logprob_dict = {}
-            for top_logprob in item["top_logprobs"]:
+            for top_logprob in item.get("top_logprobs", []):
                 top_logprob_dict[top_logprob["token"]] = top_logprob["logprob"]
 
             top_logprobs.append(top_logprob_dict)
@@ -357,15 +386,23 @@ class OpenAIChatModel(OpenAIModel):
         LOGGER.debug(f"Making {model_id} call with {self.organization}")
 
         if "logprobs" in params:
-            params["top_logprobs"] = params["logprobs"]
-            params["logprobs"] = True
+            if not model_id.startswith("gemini"):
+                params["top_logprobs"] = params["logprobs"]
+                params["logprobs"] = True
+            else:
+                params.pop("logprobs", None)
+
+        kwargs = dict(params)
+        if self.organization:
+            kwargs["organization"] = self.organization
 
         api_start = time.time()
-        api_response: OpenAICompletion = await openai.ChatCompletion.acreate(messages=prompt, model=model_id, organization=self.organization, **params)  # type: ignore
+        api_response: OpenAICompletion = await openai.ChatCompletion.acreate(messages=prompt, model=model_id, **kwargs)  # type: ignore
         api_duration = time.time() - api_start
         duration = time.time() - start_time
         context_token_cost, completion_token_cost = price_per_token(model_id)
-        context_cost = api_response.usage.prompt_tokens * context_token_cost
+        prompt_tokens = getattr(getattr(api_response, "usage", None), "prompt_tokens", 0) or 0
+        context_cost = prompt_tokens * context_token_cost
         return [
             LLMResponse(
                 model_id=model_id,
@@ -374,9 +411,9 @@ class OpenAIChatModel(OpenAIModel):
                 api_duration=api_duration,
                 duration=duration,
                 cost=context_cost
-                + count_tokens(choice.message.content) * completion_token_cost,
-                logprobs=self.convert_top_logprobs(choice.logprobs)
-                if choice.logprobs is not None
+                + count_tokens(choice.message.content or "") * completion_token_cost,
+                logprobs=self.convert_top_logprobs(getattr(choice, "logprobs", None))
+                if getattr(choice, "logprobs", None) is not None
                 else None,
             )
             for choice in api_response.choices
@@ -418,19 +455,29 @@ class OpenAIBaseModel(OpenAIModel):
     def _assert_valid_id(self, model_id: str):
         assert model_id in BASE_MODELS, f"Invalid model id: {model_id}"
 
-    @retry(stop=stop_after_attempt(8), wait=wait_fixed(2))
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
     async def _get_dummy_response_header(self, model_id: str):
-        url = "https://api.openai.com/v1/completions"
+        api_base = getattr(openai, "api_base", "https://api.openai.com/v1")
+        url = f"{api_base.rstrip('/')}/completions"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {openai.api_key}",
-            "OpenAI-Organization": self.organization,
         }
+        if self.organization:
+            headers["OpenAI-Organization"] = self.organization
         data = {"model": model_id, "prompt": "a", "max_tokens": 1}
-        response = requests.post(url, headers=headers, json=data)
-        if "x-ratelimit-limit-tokens" not in response.headers:
-            raise RuntimeError("Failed to get dummy response header")
-        return response.headers
+        try:
+            response = requests.post(url, headers=headers, json=data, timeout=15)
+            if "x-ratelimit-limit-tokens" in response.headers:
+                return response.headers
+        except Exception:
+            pass
+        return {
+            "x-ratelimit-limit-tokens": "10000000",
+            "x-ratelimit-limit-requests": "10000",
+            "x-ratelimit-remaining-tokens": "10000000",
+            "x-ratelimit-remaining-requests": "10000",
+        }
 
     @staticmethod
     def _count_prompt_token_capacity(prompt: OAIBasePrompt, **kwargs) -> int:
