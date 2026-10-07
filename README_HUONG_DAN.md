@@ -6,31 +6,35 @@ Tài liệu này hướng dẫn cách kích hoạt môi trường và chạy cá
 
 ## 1. Mở dự án & Kích hoạt môi trường ảo
 
-Mỗi khi mở một cửa sổ PowerShell mới, bạn thực hiện 2 lệnh sau:
+Mỗi khi mở một cửa sổ PowerShell mới, bạn thực hiện các lệnh sau:
 
 ```powershell
 # 1. Đi vào thư mục dự án
 cd c:\Users\nv770\OneDrive\Desktop\repo5\llm_debate
 
-# 2. Kích hoạt môi trường ảo Python
+# 2. Kích hoạt môi trường ảo Python (đã tạo)
 .\.venv\Scripts\Activate.ps1
 ```
 
-*(Khi thấy tiền tố `(.venv)` xuất hiện ở đầu dòng lệnh là đã kích hoạt thành công).*
+*(Nếu bạn clone dự án về máy mới lần đầu, hãy tạo môi trường và cài thư viện bằng: `python -m venv .venv`, sau đó `.\.venv\Scripts\Activate.ps1` và `pip install -r requirements.txt`).*
 
 ---
 
-## 2. File cấu hình khóa API (`SECRETS`)
+## 2. Tạo file cấu hình khóa API (`SECRETS`)
 
-File `SECRETS` đã được tạo sẵn tại thư mục gốc `llm_debate/SECRETS`:
+Do file chứa API key không được đẩy lên GitHub để bảo mật, khi chạy trên máy mới bạn cần **tạo một file tên là `SECRETS`** (không có đuôi file như `.txt`) ngay tại thư mục gốc `llm_debate/` với nội dung như sau:
+
 ```ini
-API_KEY=your_api_key_here
+API_KEY=your_gemini_or_openai_api_key_here
 ANTHROPIC_API_KEY=none
 DEFAULT_ORG=
 OPENAI_API_BASE=https://generativelanguage.googleapis.com/v1beta/openai/
 ```
+
 > [!NOTE]
-> Nếu bạn muốn đổi sang API Key khác (hoặc dùng thêm OpenAI GPT-4, Claude), chỉ cần chỉnh sửa trực tiếp file `SECRETS` này.
+> - Thay `your_gemini_or_openai_api_key_here` bằng khóa API của bạn.
+> - `OPENAI_API_BASE`: Để nguyên địa chỉ Google Gemini nếu dùng Gemini, hoặc xóa dòng này đi nếu dùng OpenAI API gốc.
+> - `ANTHROPIC_API_KEY`: Điền key Anthropic nếu muốn cho Claude tranh luận, hoặc để `none` nếu chỉ dùng Gemini/OpenAI.
 
 ---
 
